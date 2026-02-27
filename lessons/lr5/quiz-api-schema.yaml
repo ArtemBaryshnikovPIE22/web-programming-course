@@ -71,7 +71,7 @@ paths:
                 code:
                   type: string
                   description: Authorization code от GitHub
-                  example: "abc123def456"
+                  example: 'abc123def456'
       responses:
         '200':
           description: Успешная авторизация
@@ -88,8 +88,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: "ServerError"
-                message: "Failed to authenticate with GitHub"
+                error: 'ServerError'
+                message: 'Failed to authenticate with GitHub'
 
     get:
       tags:
@@ -152,11 +152,11 @@ paths:
                 firstName:
                   type: string
                   minLength: 1
-                  example: "Иван"
+                  example: 'Иван'
                 lastName:
                   type: string
                   minLength: 1
-                  example: "Иванов"
+                  example: 'Иванов'
       responses:
         '200':
           description: Профиль обновлен
@@ -196,8 +196,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: "ValidationError"
-                message: "firstName is required"
+                error: 'ValidationError'
+                message: 'firstName is required'
 
   /api/auth/logout:
     post:
@@ -216,7 +216,7 @@ paths:
                 properties:
                   message:
                     type: string
-                    example: "Successfully logged out"
+                    example: 'Successfully logged out'
 
   # ============ MODE ============
   /api/mode:
@@ -425,8 +425,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: "Forbidden"
-                message: "Questions are hidden in Battle Mode. Create a session to start."
+                error: 'Forbidden'
+                message: 'Questions are hidden in Battle Mode. Create a session to start.'
 
   # ============ ADMIN QUESTIONS ============
   /api/admin/questions:
@@ -981,7 +981,7 @@ components:
         token:
           type: string
           description: JWT токен
-          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
         user:
           type: object
           required:
@@ -993,7 +993,7 @@ components:
           properties:
             id:
               type: string
-              example: "usr_123"
+              example: 'usr_123'
             githubId:
               type: integer
               description: GitHub user ID
@@ -1001,18 +1001,18 @@ components:
             githubUsername:
               type: string
               description: GitHub username
-              example: "johndoe"
+              example: 'johndoe'
             avatarUrl:
               type: string
               format: uri
               description: URL аватара с GitHub
-              example: "https://avatars.githubusercontent.com/u/12345678"
+              example: 'https://avatars.githubusercontent.com/u/12345678'
             firstName:
               type: string
-              example: "John"
+              example: 'John'
             lastName:
               type: string
-              example: "Doe"
+              example: 'Doe'
             role:
               $ref: '#/components/schemas/UserRole'
 
@@ -1028,7 +1028,7 @@ components:
       properties:
         id:
           type: string
-          example: "usr_123"
+          example: 'usr_123'
         githubId:
           type: integer
           description: GitHub user ID
@@ -1036,29 +1036,29 @@ components:
         githubUsername:
           type: string
           description: GitHub username
-          example: "johndoe"
+          example: 'johndoe'
         avatarUrl:
           type: string
           format: uri
           description: URL аватара с GitHub
-          example: "https://avatars.githubusercontent.com/u/12345678"
+          example: 'https://avatars.githubusercontent.com/u/12345678'
         firstName:
           type: string
-          example: "John"
+          example: 'John'
         lastName:
           type: string
-          example: "Doe"
+          example: 'Doe'
         email:
           type: string
           format: email
           nullable: true
-          example: "john@example.com"
+          example: 'john@example.com'
         role:
           $ref: '#/components/schemas/UserRole'
         createdAt:
           type: string
           format: date-time
-          example: "2025-01-15T10:00:00Z"
+          example: '2025-01-15T10:00:00Z'
 
     # ============ MODE ============
     ModeInfo:
@@ -1134,16 +1134,16 @@ components:
       properties:
         id:
           type: string
-          example: "cat_123"
+          example: 'cat_123'
         name:
           type: string
-          example: "React Hooks"
+          example: 'React Hooks'
         slug:
           type: string
-          example: "react-hooks"
+          example: 'react-hooks'
         description:
           type: string
-          example: "Вопросы по хукам в React"
+          example: 'Вопросы по хукам в React'
         questionCount:
           type: integer
           description: Количество вопросов в категории
@@ -1195,7 +1195,7 @@ components:
         text:
           type: string
           description: Текст варианта ответа
-          example: "useEffect"
+          example: 'useEffect'
         points:
           type: integer
           description: Баллы за этот вариант (если выбран правильно)
@@ -1214,7 +1214,7 @@ components:
         criterion:
           type: string
           description: Критерий оценивания
-          example: "Понимание концепции"
+          example: 'Понимание концепции'
         maxPoints:
           type: integer
           minimum: 1
@@ -1223,7 +1223,7 @@ components:
         description:
           type: string
           description: Описание критерия
-          example: "Студент должен объяснить основную концепцию"
+          example: 'Студент должен объяснить основную концепцию'
 
     QuestionPreview:
       type: object
@@ -1236,20 +1236,20 @@ components:
       properties:
         id:
           type: string
-          example: "q_123"
+          example: 'q_123'
         type:
           $ref: '#/components/schemas/QuestionType'
         question:
           type: string
-          example: "Какие хуки используются для side effects в React?"
+          example: 'Какие хуки используются для side effects в React?'
         difficulty:
           $ref: '#/components/schemas/Difficulty'
         categoryId:
           type: string
-          example: "cat_123"
+          example: 'cat_123'
         categoryName:
           type: string
-          example: "React Hooks"
+          example: 'React Hooks'
         maxPoints:
           type: integer
           description: Максимальные баллы за вопрос
@@ -1259,7 +1259,7 @@ components:
           items:
             type: string
           description: Только текст вариантов (БЕЗ информации о правильности)
-          example: ["useState", "useEffect", "useLayoutEffect", "useMemo"]
+          example: ['useState', 'useEffect', 'useLayoutEffect', 'useMemo']
         minLength:
           type: integer
           description: Минимальная длина ответа (для essay)
@@ -1281,17 +1281,17 @@ components:
       properties:
         id:
           type: string
-          example: "q_123"
+          example: 'q_123'
         type:
           $ref: '#/components/schemas/QuestionType'
         question:
           type: string
-          example: "Какие хуки используются для side effects в React?"
+          example: 'Какие хуки используются для side effects в React?'
         difficulty:
           $ref: '#/components/schemas/Difficulty'
         categoryId:
           type: string
-          example: "cat_123"
+          example: 'cat_123'
         maxPoints:
           type: integer
           description: Максимальные баллы (сумма всех правильных вариантов или rubric)
@@ -1326,11 +1326,11 @@ components:
         createdAt:
           type: string
           format: date-time
-          example: "2025-01-15T10:00:00Z"
+          example: '2025-01-15T10:00:00Z'
         updatedAt:
           type: string
           format: date-time
-          example: "2025-01-15T11:30:00Z"
+          example: '2025-01-15T11:30:00Z'
 
     CreateQuestionRequest:
       type: object
@@ -1415,7 +1415,7 @@ components:
           items:
             type: string
           description: Фильтр по категориям (только для Game Mode)
-          example: ["cat_123", "cat_456"]
+          example: ['cat_123', 'cat_456']
         difficulty:
           $ref: '#/components/schemas/Difficulty'
           description: Фильтр по сложности (только для Game Mode)
@@ -1440,10 +1440,10 @@ components:
       properties:
         sessionId:
           type: string
-          example: "sess_abc123"
+          example: 'sess_abc123'
         userId:
           type: string
-          example: "usr_123"
+          example: 'usr_123'
         status:
           $ref: '#/components/schemas/SessionStatus'
         mode:
@@ -1472,13 +1472,13 @@ components:
         createdAt:
           type: string
           format: date-time
-          example: "2025-01-15T10:30:00Z"
+          example: '2025-01-15T10:30:00Z'
         expiresAt:
           type: string
           format: date-time
           nullable: true
           description: Время истечения сессии (для Battle Mode)
-          example: "2025-01-15T12:00:00Z"
+          example: '2025-01-15T12:00:00Z'
 
     # ============ ANSWERS ============
     SubmitAnswerRequest:
@@ -1488,7 +1488,7 @@ components:
       properties:
         questionId:
           type: string
-          example: "q_123"
+          example: 'q_123'
         selectedOptions:
           type: array
           items:
@@ -1499,7 +1499,7 @@ components:
         text:
           type: string
           description: Текст ответа (для essay)
-          example: "useMemo используется для мемоизации вычисленных значений..."
+          example: 'useMemo используется для мемоизации вычисленных значений...'
 
     AnswerResult:
       type: object
@@ -1512,10 +1512,10 @@ components:
       properties:
         answerId:
           type: string
-          example: "ans_123"
+          example: 'ans_123'
         questionId:
           type: string
-          example: "q_123"
+          example: 'q_123'
         status:
           $ref: '#/components/schemas/AnswerStatus'
         pointsEarned:
@@ -1530,7 +1530,7 @@ components:
         feedback:
           type: string
           description: Обратная связь по ответу
-          example: "Вы выбрали 2 из 3 правильных ответов"
+          example: 'Вы выбрали 2 из 3 правильных ответов'
         correctOptions:
           type: array
           items:
@@ -1586,17 +1586,17 @@ components:
       properties:
         answerId:
           type: string
-          example: "ans_456"
+          example: 'ans_456'
         questionId:
           type: string
-          example: "q_789"
+          example: 'q_789'
         status:
           type: string
           enum: [pending]
-          example: "pending"
+          example: 'pending'
         message:
           type: string
-          example: "Ответ сохранен и ожидает проверки преподавателем"
+          example: 'Ответ сохранен и ожидает проверки преподавателем'
 
     GradeEssayRequest:
       type: object
@@ -1641,10 +1641,10 @@ components:
       properties:
         sessionId:
           type: string
-          example: "sess_abc123"
+          example: 'sess_abc123'
         userId:
           type: string
-          example: "usr_123"
+          example: 'usr_123'
         status:
           type: string
           enum: [completed, partial]
@@ -1734,7 +1734,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          example: "2025-01-15T11:45:00Z"
+          example: '2025-01-15T11:45:00Z'
         timeSpent:
           type: integer
           description: Время прохождения в секундах
@@ -1762,7 +1762,7 @@ components:
                 lastSessionAt:
                   type: string
                   format: date-time
-                  example: "2025-01-15T10:00:00Z"
+                  example: '2025-01-15T10:00:00Z'
             difficultySettings:
               $ref: '#/components/schemas/UserDifficultySettings'
 
@@ -1782,11 +1782,11 @@ components:
         updatedAt:
           type: string
           format: date-time
-          example: "2025-01-15T09:00:00Z"
+          example: '2025-01-15T09:00:00Z'
         updatedBy:
           type: string
           description: ID админа, который обновил настройки
-          example: "usr_admin"
+          example: 'usr_admin'
 
     # ============ ERRORS ============
     Error:
@@ -1797,10 +1797,10 @@ components:
       properties:
         error:
           type: string
-          example: "BadRequest"
+          example: 'BadRequest'
         message:
           type: string
-          example: "Invalid question type"
+          example: 'Invalid question type'
         details:
           type: object
           description: Дополнительная информация об ошибке
@@ -1814,8 +1814,8 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
           example:
-            error: "BadRequest"
-            message: "Invalid difficulty level"
+            error: 'BadRequest'
+            message: 'Invalid difficulty level'
 
     Unauthorized:
       description: Требуется авторизация
@@ -1824,8 +1824,8 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
           example:
-            error: "Unauthorized"
-            message: "Authentication required"
+            error: 'Unauthorized'
+            message: 'Authentication required'
 
     Forbidden:
       description: Доступ запрещен
@@ -1834,8 +1834,8 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
           example:
-            error: "Forbidden"
-            message: "Admin access required"
+            error: 'Forbidden'
+            message: 'Admin access required'
 
     NotFound:
       description: Ресурс не найден
@@ -1844,8 +1844,8 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
           example:
-            error: "NotFound"
-            message: "Resource not found"
+            error: 'NotFound'
+            message: 'Resource not found'
 
     InternalError:
       description: Внутренняя ошибка сервера
@@ -1854,5 +1854,5 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
           example:
-            error: "InternalServerError"
-            message: "An unexpected error occurred"
+            error: 'InternalServerError'
+            message: 'An unexpected error occurred'

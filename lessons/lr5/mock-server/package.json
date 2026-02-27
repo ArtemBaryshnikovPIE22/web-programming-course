@@ -7,12 +7,18 @@
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["quiz", "mock", "api", "json-server"],
+  "keywords": [
+    "quiz",
+    "mock",
+    "api",
+    "json-server"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "json-server": "^0.17.4",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pluralize": "^8.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

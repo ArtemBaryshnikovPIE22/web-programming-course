@@ -1,4 +1,4 @@
-import { defineConfig } from 'orval';
+import { defineConfig } from 'orval'
 
 export default defineConfig({
   quiz: {
@@ -25,7 +25,7 @@ export default defineConfig({
             query: {
               useQuery: true,
               useMutation: true,
-            }
+            },
             // : true, // Принудительно делаем мутацией
           },
         },
@@ -37,4 +37,4 @@ export default defineConfig({
       afterAllFilesWrite: 'prettier --write',
     },
   },
-});
+})
