@@ -1,325 +1,244 @@
-import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
-import { PrismaClient } from '@prisma/client'
-import { requireAdmin } from '../middleware/admin.js'
-import { questionSchema, gradeSchema } from '../utils/validation.js'
-import { scoringService } from '../services/scoringService.js'
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
+import { adminMiddleware } from '../middleware/admin.js';
+import { QuestionSchema, GradeSchema } from '../utils/validation.js';
+import type { InputJsonValue } from '@prisma/client/runtime/library';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
-const prisma = new PrismaClient()
-const admin = new Hono()
+export const admin = new Hono();
 
-// Все admin endpoints требуют аутентификации и admin роли
-admin.use('*', requireAdmin)
+admin.use('*', adminMiddleware);
 
-// GET /api/admin/questions - получить все вопросы
 admin.get('/questions', async (c) => {
-  try {
-    const questions = await prisma.question.findMany({
-      include: {
-        category: true,
-        _count: {
-          select: { answers: true }
+    try {
+      const questions = await prisma.question.findMany({
+        select: {
+          id: true,
+          text: true,
+          type: true,
+          categoryId: true,
+          correctAnswer: true,
+          points: true,
+          category: { select: { name: true } },
+          _count: { select: { answers: true } }
         }
-      }
-    })
+      });
+      return c.json({ questions });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
 
-    return c.json({ questions })
-  } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
-  }
-})
-
-// POST /api/admin/questions - создать вопрос
-admin.post('/questions', zValidator('json', questionSchema), async (c) => {
+// POST /api/admin/questions – создать вопрос
+admin.post('/questions', async (c) => {
   try {
-    const data = c.req.valid('json')
-    
-    // Для multiple-select вопросов проверяем correctAnswer
-    if (data.type === 'multiple-select') {
-      if (!data.correctAnswer) {
-        return c.json({ 
-          error: 'Для multiple-select вопросов нужно указать correctAnswer' 
-        }, 400)
-      }
-      
-      // Проверяем, что correctAnswer - массив
-      if (!Array.isArray(data.correctAnswer)) {
-        return c.json({ 
-          error: 'correctAnswer должен быть массивом строк' 
-        }, 400)
-      }
+    const body = await c.req.json();
+    const data = QuestionSchema.parse(body);
+
+    const createData: any = {
+      text: data.text,
+      type: data.type,
+      categoryId: data.categoryId,
+      points: data.points,
+    };
+    if (data.correctAnswer !== undefined) {
+      createData.correctAnswer = data.correctAnswer as InputJsonValue;
     }
 
-    const question = await prisma.question.create({
-      data: {
-        text: data.text,
-        type: data.type,
-        categoryId: data.categoryId,
-        correctAnswer: data.correctAnswer ? JSON.stringify(data.correctAnswer) : null,
-        points: data.points
-      },
-      include: {
-        category: true
-      }
-    })
+    const question = await prisma.question.create({ data: createData });
 
-    return c.json({ question }, 201)
+    return c.json({ question }, 201);
   } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
+    if (error instanceof z.ZodError) {
+      return c.json({ error: error.flatten() }, 400);
+    }
+    console.error(error);
+    return c.json({ error: 'Internal Server Error' }, 500);
   }
-})
+});
 
-// POST /api/admin/questions/batch - создать несколько вопросов
-admin.post('/questions/batch', async (c) => {
+// PUT /api/admin/questions/:id – обновить вопрос
+admin.put('/questions/:id', async (c) => {
   try {
-    const { questions } = await c.req.json()
-    
-    const result = await prisma.question.createMany({
-      data: questions.map((q: any) => ({
-        text: q.text,
-        type: q.type,
-        categoryId: q.categoryId,
-        correctAnswer: q.correctAnswer ? JSON.stringify(q.correctAnswer) : null,
-        points: q.points || 1
-      })),
-    })
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const data = QuestionSchema.partial().parse(body);
 
-    return c.json({ count: result.count })
-  } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
-  }
-})
-
-// PUT /api/admin/questions/:id - обновить вопрос
-admin.put('/questions/:id', zValidator('json', questionSchema), async (c) => {
-  try {
-    const id = c.req.param('id')
-    const data = c.req.valid('json')
+    const updateData: any = {};
+    if (data.text !== undefined) updateData.text = data.text;
+    if (data.type !== undefined) updateData.type = data.type;
+    if (data.categoryId !== undefined) updateData.categoryId = data.categoryId;
+    if (data.points !== undefined) updateData.points = data.points;
+    if (data.correctAnswer !== undefined) {
+      updateData.correctAnswer = data.correctAnswer as InputJsonValue;
+    }
 
     const question = await prisma.question.update({
       where: { id },
-      data: {
-        text: data.text,
-        type: data.type,
-        categoryId: data.categoryId,
-        correctAnswer: data.correctAnswer ? JSON.stringify(data.correctAnswer) : null,
-        points: data.points
-      },
-      include: {
-        category: true
-      }
-    })
+      data: updateData,
+    });
 
-    return c.json({ question })
+    return c.json({ question });
   } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
+    if (error instanceof z.ZodError) {
+      return c.json({ error: error.flatten() }, 400);
+    }
+    if (error instanceof PrismaClientKnownRequestError && error.code === 'P2025') {
+      return c.json({ error: 'Question not found' }, 404);
+    }
+    console.error(error);
+    return c.json({ error: 'Internal Server Error' }, 500);
   }
-})
+});
 
-// GET /api/admin/answers/pending - получить непроверенные essay ответы
+// GET /api/admin/answers/pending – непроверенные essay ответы с пагинацией
 admin.get('/answers/pending', async (c) => {
-  try {
-    const page = parseInt(c.req.query('page') || '1')
-    const limit = parseInt(c.req.query('limit') || '10')
-    const skip = (page - 1) * limit
-
-    const answers = await prisma.answer.findMany({
-      where: {
-        question: {
-          type: 'essay'
-        },
-        score: null // непроверенные
-      },
-      include: {
-        session: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true
-              }
-            }
-          }
-        },
-        question: {
-          include: {
-            category: true
-          }
-        }
-      },
-      orderBy: {
-        createdAt: 'asc'
-      },
-      skip,
-      take: limit
-    })
-
-    const total = await prisma.answer.count({
-      where: {
+    try {
+      const page = parseInt(c.req.query('page') || '1');
+      const limit = parseInt(c.req.query('limit') || '10');
+      const skip = (page - 1) * limit;
+  
+      const where = {
         question: { type: 'essay' },
-        score: null
-      }
-    })
-
-    return c.json({
-      answers,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    })
-  } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
-  }
-})
-
-// POST /api/admin/answers/:id/grade - оценить essay
-admin.post('/answers/:id/grade', zValidator('json', gradeSchema), async (c) => {
-  try {
-    const answerId = c.req.param('id')
-    const { grades, rubric } = c.req.valid('json')
-
-    // Используем транзакцию
-    const result = await prisma.$transaction(async (tx) => {
-      // Получаем ответ
-      const answer = await tx.answer.findUnique({
-        where: { id: answerId },
-        include: {
-          question: true,
-          session: {
-            include: {
-              answers: true
-            }
-          }
-        }
-      })
-
-      if (!answer) {
-        throw new Error('Ответ не найден')
-      }
-
-      if (answer.question.type !== 'essay') {
-        throw new Error('Можно оценивать только essay вопросы')
-      }
-
-      if (answer.score !== null) {
-        throw new Error('Ответ уже оценен')
-      }
-
-      // Вычисляем баллы
-      const score = scoringService.scoreEssay(grades, rubric)
-
-      // Обновляем ответ
-      const updatedAnswer = await tx.answer.update({
-        where: { id: answerId },
-        data: { score },
-        include: {
-          question: true,
-          session: {
-            include: {
-              user: true
-            }
-          }
-        }
-      })
-
-      // Проверяем, все ли ответы в сессии оценены
-      const sessionAnswers = await tx.answer.findMany({
-        where: {
-          sessionId: answer.sessionId
-        },
-        include: {
-          question: true
-        }
-      })
-
-      const allGraded = sessionAnswers.every(a => 
-        a.question.type !== 'essay' || a.score !== null
-      )
-
-      // Если все оценены, обновляем общий балл сессии
-      if (allGraded) {
-        const totalScore = sessionAnswers.reduce((sum, a) => sum + (a.score || 0), 0)
-        
-        await tx.session.update({
-          where: { id: answer.sessionId },
-          data: { score: totalScore }
-        })
-      }
-
-      return updatedAnswer
-    })
-
-    return c.json({ answer: result })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
-    return c.json({ error: message }, 400)
-  }
-})
-
-// GET /api/admin/students/:userId/stats - статистика студента
-admin.get('/students/:userId/stats', async (c) => {
-  try {
-    const userId = c.req.param('userId')
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        sessions: {
-          where: {
-            status: 'completed'
-          },
+        score: null,
+        isCorrect: null,
+      };
+  
+      const [answers, total] = await prisma.$transaction([
+        prisma.answer.findMany({
+          where,
+          skip,
+          take: limit,
           include: {
-            answers: true
-          }
+            session: {
+              include: {
+                user: { select: { id: true, name: true, email: true } }
+              }
+            },
+            question: { select: { id: true, text: true, points: true } }
+          },
+          orderBy: { createdAt: 'asc' }
+        }),
+        prisma.answer.count({ where })
+      ]);
+  
+      return c.json({
+        answers,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
         }
-      }
-    })
+      });
+    } catch (error) {
+      console.error(error);
+      return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
 
-    if (!user) {
-      return c.json({ error: 'Пользователь не найден' }, 404)
+// POST /api/admin/answers/:id/grade – оценить essay
+admin.post('/answers/:id/grade', async (c) => {
+  try {
+    const answerId = c.req.param('id');
+    const body = await c.req.json();
+    const { grades } = GradeSchema.parse(body);
+
+    const answer = await prisma.answer.findUnique({
+      where: { id: answerId },
+      include: {
+        question: true,
+        session: { include: { answers: true } }
+      }
+    });
+
+    if (!answer) {
+      return c.json({ error: 'Answer not found' }, 404);
+    }
+    if (answer.question.type !== 'essay') {
+      return c.json({ error: 'Answer is not an essay' }, 400);
     }
 
-    const completedSessions = user.sessions.length
-    const totalScore = user.sessions.reduce((sum, s) => sum + (s.score || 0), 0)
-    const averageScore = completedSessions > 0 ? totalScore / completedSessions : 0
+    const maxPoints = answer.question.points;
+    const totalGrade = grades.reduce((sum, g) => sum + g, 0);
+    const finalScore = Math.min(totalGrade, maxPoints);
 
-    // Количество ответов по типам вопросов
-    const answersByType = await prisma.answer.groupBy({
-      by: ['questionId'],
-      where: {
-        session: {
-          userId
+    const updatedAnswer = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const ans = await tx.answer.update({
+        where: { id: answerId },
+        data: { score: finalScore, isCorrect: true },
+      });
+
+      const sessionId = answer.sessionId;
+      const sessionAnswers = await tx.answer.findMany({
+        where: {
+          sessionId,
+          question: { type: 'essay' }
         }
-      },
-      _count: true
-    })
+      });
 
-    return c.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email
-      },
-      stats: {
-        completedSessions,
-        totalScore,
-        averageScore,
-        totalAnswers: user.sessions.reduce((sum, s) => sum + s.answers.length, 0)
+      const allGraded = sessionAnswers.every((a: any) => a.score !== null);
+      if (allGraded) {
+        const allAnswers = await tx.answer.findMany({ where: { sessionId } });
+        const totalScore = allAnswers.reduce((sum: number, a: any) => sum + (a.score || 0), 0);
+        await tx.session.update({
+          where: { id: sessionId },
+          data: { score: totalScore }
+        });
       }
-    })
-  } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
-  }
-})
 
-export default admin
+      return ans;
+    });
+
+    return c.json({ answer: updatedAnswer });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return c.json({ error: error.flatten() }, 400);
+    }
+    console.error(error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+// GET /api/admin/students/:userId/stats – статистика студента
+admin.get('/students/:userId/stats', async (c) => {
+  try {
+    const userId = c.req.param('userId');
+    const sessions = await prisma.session.findMany({
+      where: { userId, status: 'completed' },
+      select: { score: true }
+    });
+
+    if (sessions.length === 0) {
+      return c.json({ studentId: userId, averageScore: 0, totalSessions: 0 });
+    }
+
+    const totalScore = sessions.reduce((sum: number, s: any) => sum + (s.score || 0), 0);
+    const averageScore = totalScore / sessions.length;
+
+    return c.json({ studentId: userId, averageScore, totalSessions: sessions.length });
+  } catch (error) {
+    console.error(error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+admin.post('/questions/batch', async (c) => {
+    try {
+      const body = await c.req.json();
+      const questionsData = z.array(QuestionSchema).parse(body);
+      const result = await prisma.question.createMany({
+        data: questionsData
+      });
+      return c.json({ count: result.count }, 201);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return c.json({ error: error.flatten() }, 400);
+      }
+      console.error(error);
+      return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});

@@ -1,15 +1,13 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '@prisma/client';
+import { addQueryLogging } from './prismaMiddleware.js';
 
-declare global {
-  // Чтобы избежать повторного создания PrismaClient при HMR / hot reload
-  // @ts-ignore
-  var prisma: PrismaClient | undefined
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+  // addQueryLogging(prisma); // логируем медленные запросы в разработке
 }
-
-export const prisma =
-  global.prisma ??
-  new PrismaClient({
-    log: ['query', 'info', 'warn', 'error'],
-  })
-
-if (process.env.NODE_ENV !== 'production') global.prisma = prisma

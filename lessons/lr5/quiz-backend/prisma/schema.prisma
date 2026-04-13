@@ -1,10 +1,10 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
 }
 
 model User {
@@ -30,10 +30,10 @@ model Category {
 model Question {
   id             String   @id @default(cuid())
   text           String
-  type           String
+  type           String   // "single-select", "multiple-select", "essay"
   categoryId     String
   category       Category @relation(fields: [categoryId], references: [id])
-  correctAnswer String?  // вместо Json
+  correctAnswer  Json?    // Правильные ответы для автопроверки
   points         Int      @default(1)
   answers        Answer[]
   createdAt      DateTime @default(now())
@@ -64,11 +64,13 @@ model Answer {
   session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   questionId String
   question   Question @relation(fields: [questionId], references: [id])
-  userAnswer String?   // <-- изменили на String
-  score      Float?  
-  isCorrect  Boolean?
+  userAnswer Json
+  score      Float?   // null если ещё не проверен (essay)
+  isCorrect  Boolean? // для автопроверки
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@unique([sessionId, questionId])
+  @@unique([sessionId, questionId]) // один ответ на вопрос в сессии
+  @@index([sessionId])
+  @@index([questionId])
 }

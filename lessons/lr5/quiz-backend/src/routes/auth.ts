@@ -1,77 +1,52 @@
 import { Hono } from 'hono'
 import { sign, verify } from 'hono/jwt'
-import { PrismaClient } from '@prisma/client' 
 import { githubCallbackSchema } from '../utils/validation.js'
+import { prisma } from '../lib/prisma.js'
+import { getGitHubUserByCode } from '../services/github.js'
 
-const prisma = new PrismaClient() 
 const auth = new Hono()
-
-// Mock данные
-const MOCK_USERS: Record<string, { id: string; email: string; name: string }> = {
-  'test_code': {
-    id: '12345',
-    email: 'test@example.com',
-    name: 'Test User'
-  },
-  'test_code_2': {
-    id: '67890',
-    email: 'test2@example.com',
-    name: 'Test User 2'
-  }
-}
 
 // POST /api/auth/github/callback
 auth.post('/github/callback', async (c) => {
   try {
+    // Получение и валидация тела запроса
     const body = await c.req.json()
-    console.log('Request body:', body)
-    
+    console.log('📦 Request body:', body)
+
     const validation = githubCallbackSchema.safeParse(body)
-    
+
     if (!validation.success) {
-      return c.json({ 
-        error: 'Validation failed', 
-        details: validation.error.issues 
+      return c.json({
+        error: 'Validation failed',
+        details: validation.error.issues
       }, 400)
     }
 
     const { code } = validation.data
-    console.log('Processing code:', code)
+    console.log('🔑 Processing code:', code)
 
-    let githubUser
+    // Получаем пользователя из GitHub
+    const githubUser = await getGitHubUserByCode(code)
+    console.log('GitHub user:', githubUser)
 
-    // Mock режим для тестирования
-    if (code.startsWith('test_')) {
-      console.log('Using mock mode')
-      
-      githubUser = MOCK_USERS[code]
-      
-      if (!githubUser) {
-        githubUser = {
-          id: `mock_${Date.now()}`,
-          email: `user_${code}@example.com`,
-          name: `User ${code}`
-        }
-      }
-    } else {
-      return c.json({ 
-        error: 'Real GitHub OAuth not implemented. Use test_* codes for testing.' 
-      }, 501)
+    // Подготавливаем данные для БД
+    const userData = {
+      githubId: String(githubUser.id),
+      name: githubUser.name ?? null,                    // name может быть null
+      email: githubUser.email ?? `github-${githubUser.id}@example.com`, // заглушка, если email не предоставлен
     }
 
-    
+    // Сохраняем в базу данных (upsert)
     const user = await prisma.user.upsert({
-      where: { githubId: githubUser.id },
+      where: { githubId: userData.githubId },
       update: {
-        name: githubUser.name,
-        email: githubUser.email
+        name: userData.name,
+        email: userData.email,
       },
-      create: {
-        githubId: githubUser.id,
-        name: githubUser.name,
-        email: githubUser.email
-      }
+      create: userData,
     })
+
+    console.log('User saved:', user)
 
     // Создаем JWT токен
     const payload = {
@@ -84,7 +59,7 @@ auth.post('/github/callback', async (c) => {
     const secret = process.env.JWT_SECRET || 'dev-secret-key'
     const token = await sign(payload, secret)
 
-    // Возвращаем ответ
+    // Возвращаем ответ клиенту
     return c.json({
       success: true,
       token,
@@ -97,8 +72,16 @@ auth.post('/github/callback', async (c) => {
     })
 
   } catch (error) {
-    console.error('error:', error)
-    return c.json({ 
+    console.error('❌ Auth error:', error)
+    // Если ошибка от GitHubServiceError – можно вернуть её статус и сообщение
+    if (error instanceof Error && 'statusCode' in error) {
+      const ghError = error as any // упрощённо
+      return c.json({
+        success: false,
+        error: ghError.message
+      }, ghError.statusCode || 500)
+    }
+    return c.json({
       success: false,
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -106,12 +89,14 @@ auth.post('/github/callback', async (c) => {
   }
 })
 
+// Эндпоинт GET /api/auth/me (без изменений)
 auth.get('/me', async (c) => {
   try {
+    // Проверка заголовка Authorization
     const authHeader = c.req.header('Authorization')
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return c.json({ 
+      return c.json({
         success: false,
         error: 'Unauthorized',
         message: 'Missing or invalid Authorization header'
@@ -119,21 +104,23 @@ auth.get('/me', async (c) => {
     }
 
     const token = authHeader.split(' ')[1]
-
     const secret = process.env.JWT_SECRET || 'dev-secret-key'
+    // Проверка токена
     const payload = await verify(token, secret, 'HS256')
 
+    // Поиск пользователя в БД
     const user = await prisma.user.findUnique({
       where: { id: payload.sub as string }
     })
 
     if (!user) {
-      return c.json({ 
+      return c.json({
         success: false,
         error: 'User not found'
       }, 404)
     }
 
+    // Ответ
     return c.json({
       success: true,
       user: {
@@ -144,8 +131,9 @@ auth.get('/me', async (c) => {
       }
     })
 
+  // Обработка проверок ошибки токена  
   } catch (error) {
-    return c.json({ 
+    return c.json({
       success: false,
       error: 'Unauthorized',
       message: 'Invalid token'

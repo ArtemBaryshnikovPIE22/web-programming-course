@@ -1,147 +1,247 @@
-import { PrismaClient } from '@prisma/client'
-import { scoringService } from './scoringService.js'
+import { scoringService } from "./scoringService.js"
+import { prisma } from "../lib/prisma.js"
+import type { Prisma } from "@prisma/client"
 
-const prisma = new PrismaClient()
-
-export interface SubmitAnswerInput {
-  sessionId: string
-  questionId: string
-  userAnswer: any // JSON данные
+// =========================
+// =========================
+export class SessionNotFoundError extends Error {
+constructor() {
+    super("Session not found")
+}
 }
 
+export class SessionExpiredError extends Error {
+constructor() {
+    super("Session has expired")
+}
+}
+
+export class SessionAlreadyCompletedError extends Error {
+constructor() {
+    super("Session already completed")
+}
+}
+
+export class QuestionNotFoundError extends Error {
+constructor() {
+    super("Question not found")
+}
+}
+
+export class DuplicateAnswerError extends Error {
+constructor() {
+    super("Answer already submitted for this question")
+}
+}
+
+// =========================
+// Utils
+// =========================
+function isStringArray(value: unknown): value is string[] {
+return Array.isArray(value) && value.every((v) => typeof v === "string")
+}
+
+// =========================
+// Service
+// =========================
 export class SessionService {
+//
+//
+async createSession(
+    userId: string,
+    options?: { categoryId?: string; limit?: number; mode?: string }
+) {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+     const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
 
-  async submitAnswer(data: SubmitAnswerInput) {
-    return await prisma.$transaction(async (tx) => {
-      // 1. Проверяем сессию
-      const session = await tx.session.findUnique({
-        where: { id: data.sessionId },
-        include: { user: true }
-      })
-
-      if (!session) {
-        throw new Error('Сессия не найдена')
-      }
-
-      if (session.status !== 'in_progress') {
-        throw new Error('Сессия уже завершена или истекла')
-      }
-
-      if (session.expiresAt < new Date()) {
-        await tx.session.update({
-          where: { id: data.sessionId },
-          data: { status: 'expired' }
-        })
-        throw new Error('Время сессии истекло')
-      }
-
-      // 2. Проверяем вопрос
-      const question = await tx.question.findUnique({
-        where: { id: data.questionId }
-      })
-
-      if (!question) {
-        throw new Error('Вопрос не найден')
-      }
-
-      // 3. Проверяем, не отвечали ли уже на этот вопрос
-      const existingAnswer = await tx.answer.findUnique({
-        where: {
-          sessionId_questionId: {
-            sessionId: data.sessionId,
-            questionId: data.questionId
-          }
-        }
-      })
-
-      if (existingAnswer) {
-        throw new Error('Ответ на этот вопрос уже был отправлен')
-      }
-
-      // 4. Вычисляем баллы (для автоматически проверяемых типов)
-      let score: number | null = null
-      let isCorrect: boolean | null = null
-
-      if (question.type === 'multiple-select') {
-        score = scoringService.scoreQuestion(
-          'multiple-select',
-          question.correctAnswer ? JSON.parse(question.correctAnswer) : [],
-          data.userAnswer
-        )
-        isCorrect = score > 0
-      }
-      // Для essay score остается null до проверки админом
-
-      // 5. Сохраняем ответ
-      const answer = await tx.answer.create({
+     const session = await tx.session.create({
         data: {
-          sessionId: data.sessionId,
-          questionId: data.questionId,
-          userAnswer: JSON.stringify(data.userAnswer),
-          score,
-          isCorrect
-        }
-      })
+         userId,
+         expiresAt,
+         status: "in_progress",
+        },
+     })
 
-      return answer
+     // фильтр
+     const where: any = {}
+     if (options?.categoryId) {
+        where.categoryId = options.categoryId
+     }
+
+     const allQuestions = await tx.question.findMany({
+        where,
+        select: {
+         id: true,
+         text: true,
+         type: true,
+         points: true,
+         categoryId: true,
+        },
+     })
+
+     if (allQuestions.length === 0) {
+        throw new QuestionNotFoundError()
+     }
+
+     // 🎲 random + limit
+     let selected = allQuestions
+     if (options?.limit && options.limit > 0) {
+        selected = allQuestions
+         .sort(() => 0.5 - Math.random())
+         .slice(0, options.limit)
+     }
+
+     return {
+        session,
+        questions: selected,
+        mode: options?.mode || "standard",
+     }
     })
-  }
+}
 
-  async submitSession(sessionId: string) {
-    return await prisma.$transaction(async (tx) => {
-      const session = await tx.session.findUnique({
+//
+//
+async getSession(sessionId: string, userId: string) {
+    const session = await prisma.session.findUnique({
+     where: { id: sessionId },
+     include: {
+        answers: {
+         include: {
+            question: {
+             select: {
+                id: true,
+                text: true,
+                type: true,
+                points: true,
+             },
+            },
+         },
+        },
+     },
+    })
+
+    if (!session || session.userId !== userId) {
+     throw new SessionNotFoundError()
+    }
+
+    return session
+}
+
+//
+//
+async submitAnswer(
+    sessionId: string,
+    questionId: string,
+    userAnswer: string | string[]
+) {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+     const session = await tx.session.findUnique({
         where: { id: sessionId },
-        include: { 
-          answers: {
-            include: { question: true }
-          }
+     })
+
+     if (!session) throw new SessionNotFoundError()
+     if (session.status !== "in_progress") throw new SessionAlreadyCompletedError()
+     if (session.expiresAt < new Date()) throw new SessionExpiredError()
+
+     const question = await tx.question.findUnique({
+        where: { id: questionId },
+     })
+
+     if (!question) throw new QuestionNotFoundError()
+
+     let score: number | null = null
+     let isCorrect: boolean | null = null
+
+     //
+     // 🔹 single-select
+     //
+     if (question.type === "single-select" && question.correctAnswer) {
+        const correct = JSON.parse(question.correctAnswer) as string[]
+
+        if (!Array.isArray(userAnswer)) {
+         throw new Error("Invalid answer format")
         }
-      })
 
-      if (!session) {
-        throw new Error('Сессия не найдена')
-      }
+        isCorrect = correct[0] === userAnswer[0]
+        score = isCorrect ? question.points : 0
+     }
 
-      if (session.status !== 'in_progress') {
-        throw new Error('Сессия уже завершена или истекла')
-      }
+     
 
-      // Вычисляем общий балл (только по автоматически проверенным ответам)
-      const totalScore = session.answers.reduce((sum, answer) => {
-        return sum + (answer.score || 0)
+
+
+     // 🔹 multiple-select
+     //
+     if (question.type === "multiple-select") {
+        if (!isStringArray(userAnswer)) {
+         throw new Error("Invalid answer format")
+        }
+
+        const correct = JSON.parse(question.correctAnswer || "[]") as string[]
+
+        const correctNumbers = correct.map(Number)
+        const userNumbers = userAnswer.map(Number)
+
+        score = scoringService.scoreMultipleSelect(correctNumbers, userNumbers)
+        const correctSet = new Set(correct)
+        const userSet = new Set(userAnswer)
+
+        isCorrect =
+         correctSet.size === userSet.size &&
+         [...userSet].every((a) => correctSet.has(a))
+     }
+
+     // ✅ upsert вместо create (лучше UX)
+     const answer = await tx.answer.upsert({
+        where: {
+         sessionId_questionId: { sessionId, questionId },
+        },
+        create: {
+         sessionId,
+         questionId,
+         userAnswer: JSON.stringify(userAnswer),
+         score,
+         isCorrect,
+        },
+        update: {
+         userAnswer: JSON.stringify(userAnswer),
+         score,
+         isCorrect,
+        },
+     })
+
+     return answer
+    })
+}
+
+//
+// ✅ SUBMIT SESSION
+//
+async submitSession(sessionId: string) {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+     const session = await tx.session.findUnique({
+        where: { id: sessionId },
+        include: { answers: true },
+     })
+
+     if (!session) throw new SessionNotFoundError()
+     if (session.status !== "in_progress") throw new SessionAlreadyCompletedError()
+     if (session.expiresAt < new Date()) throw new SessionExpiredError()
+
+      const score = session.answers.reduce((sum, a) => {
+      if (a.score === null) return sum
+      return sum + a.score
       }, 0)
 
-      // Обновляем сессию
-      const updatedSession = await tx.session.update({
+     return await tx.session.update({
         where: { id: sessionId },
         data: {
-          status: 'completed',
-          score: totalScore,
-          completedAt: new Date()
-        }
-      })
-
-      return updatedSession
+         status: "completed",
+         score,
+         completedAt: new Date(),
+        },
+     })
     })
-  }
-
-  async getSessionWithAnswers(sessionId: string, userId: string) {
-const session = await prisma.session.findUnique({
-  where: { id: sessionId },
-  include: {
-    user: true,
-    answers: {
-      include: {
-        question: true
-      }
-    }
-  }
-})
-
-if (!session) throw new Error('Сессия не найдена')
-if (session.user.id !== userId) throw new Error('Нет доступа к этой сессии')
-
-return session
 }
 }
 

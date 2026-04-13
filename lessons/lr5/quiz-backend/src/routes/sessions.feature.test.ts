@@ -1,65 +1,174 @@
-import { describe, it, expect, vi } from 'vitest'
-import app from '../index'
-import { prismaMock } from '../__mocks__/prisma'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { Hono } from 'hono';
+import auth from './auth.js';
+import { sessions } from './sessions.js';
+import { prisma } from '../lib/prisma.js';
+import { clearDatabase } from '../tests/setup/test-db.js';
+import { seedCategoryAndQuestion } from '../tests/setup/seed.js';
 
-vi.mock('../lib/prisma', () => ({
-  prisma: prismaMock
-}))
+const app = new Hono();
+app.route('/api/auth', auth);
+app.route('/api/sessions', sessions);
 
-describe('Sessions Feature Tests', () => {
-  const mockUserId = 'cjld2cjxh0000qzrmn831i7rn'
+describe('Sessions feature tests', () => {
+  let token: string;
+  let userId: string;
 
-  describe('POST /sessions/start', () => {
-    it('should create a new session for a valid user', async () => {
-      // Имитируем, что пользователь существует
-      prismaMock.user.findUnique.mockResolvedValue({ id: mockUserId, role: 'STUDENT' } as any)
-      // Имитируем создание сессии
-      prismaMock.session.create.mockResolvedValue({
-        id: 'session-789',
-        userId: mockUserId,
-        status: 'ACTIVE'
-      } as any)
-
-      const res = await app.request('/api/sessions/start', {
+  beforeAll(async () => {
+    await clearDatabase();
+    // Создаём тестового пользователя через callback
+    const authRes = await app.request(
+      new Request('http://localhost/api/auth/github/callback', {
         method: 'POST',
-        body: JSON.stringify({ userId: mockUserId }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'test_code' }),
       })
+    );
+    const { token: newToken, user } = await authRes.json();
+    token = newToken;
+    userId = user.id;
 
-      expect(res.status).toBe(201)
-      const body = await res.json()
-      expect(body.sessionId).toBe('session-789')
-    })
+    // Создаём категорию и вопрос (тестовые данные)
+    await seedCategoryAndQuestion();
+  });
 
-    it('should return 403 if user is not authorized to start session (Role Check)', async () => {
-      // Имитируем пользователя с заблокированной ролью или специфическое ограничение
-      prismaMock.user.findUnique.mockResolvedValue({ id: mockUserId, role: 'BANNED' } as any)
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
 
-      const res = await app.request('/api/sessions/start', {
+  it('should create a session and return session data', async () => {
+    const request = new Request('http://localhost/api/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mode: 'standard' }),
+    });
+    const res = await app.request(request);
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data).toHaveProperty('sessionId');
+    expect(data.userId).toBe(userId);
+    expect(data.status).toBe('in_progress');
+    expect(data.questions.length).toBeGreaterThan(0);
+  });
+
+  it('should submit an answer and return answer object', async () => {
+    // Создаём сессию
+    const createRes = await app.request(
+      new Request('http://localhost/api/sessions', {
         method: 'POST',
-        body: JSON.stringify({ userId: mockUserId }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
       })
+    );
+    const { sessionId, questions } = await createRes.json();
+    const questionId = questions[0].id;
 
-      // В зависимости от вашей реализации RBAC это может быть 403 или ошибка валидации
-      expect(res.status).toBe(403)
-    })
-  })
+    const answerRequest = new Request(`http://localhost/api/sessions/${sessionId}/answers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId, userAnswer: ['0'] }),
+    });
+    const answerRes = await app.request(answerRequest);
+    expect(answerRes.status).toBe(201);
+    const answerData = await answerRes.json();
+    expect(answerData.answer.questionId).toBe(questionId);
+    expect(answerData.answer.score).toBeDefined();
+  });
 
-  describe('POST /sessions/submit-answer', () => {
-    it('should fail if questionId is not a valid CUID (Edge Case)', async () => {
-      const res = await app.request('/api/sessions/submit-answer', {
+  it('should complete session and calculate score', async () => {
+    const createRes = await app.request(
+      new Request('http://localhost/api/sessions', {
         method: 'POST',
-        body: JSON.stringify({
-          questionId: 'short', // Не CUID
-          userAnswer: 'A'
-        }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
       })
+    );
+    const { sessionId, questions } = await createRes.json();
+    const questionId = questions[0].id;
 
-      expect(res.status).toBe(400)
-      const body = await res.json()
-      expect(body.error).toContain('Некорректный формат questionId')
-    })
-  })
-})
+    // Отвечаем
+    await app.request(
+      new Request(`http://localhost/api/sessions/${sessionId}/answers`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionId, userAnswer: ['0'] }),
+      })
+    );
+
+    // Завершаем
+    const submitRes = await app.request(
+      new Request(`http://localhost/api/sessions/${sessionId}/submit`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    );
+    expect(submitRes.status).toBe(200);
+    const submitData = await submitRes.json();
+    expect(submitData.session.status).toBe('completed');
+    expect(submitData.session.score).toBeGreaterThan(0);
+  });
+
+  // Негативные тесты для сессий
+  it('should return 401 when no token provided for creating session', async () => {
+    const request = new Request('http://localhost/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const res = await app.request(request);
+    expect(res.status).toBe(401);
+  });
+
+  it('should return 401 when no token provided for submitting answer', async () => {
+    const createRes = await app.request(
+      new Request('http://localhost/api/sessions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+    const { sessionId, questions } = await createRes.json();
+    const questionId = questions[0].id;
+
+    const request = new Request(`http://localhost/api/sessions/${sessionId}/answers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId, userAnswer: ['0'] }),
+    });
+    const res = await app.request(request);
+    expect(res.status).toBe(401);
+  });
+
+  it('should return 401 for invalid token on session endpoint', async () => {
+    const request = new Request('http://localhost/api/sessions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer invalid', 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const res = await app.request(request);
+    expect(res.status).toBe(401);
+  });
+
+  it('should return 400 for invalid answer format (number instead of array)', async () => {
+    const createRes = await app.request(
+      new Request('http://localhost/api/sessions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+    const { sessionId, questions } = await createRes.json();
+    const questionId = questions[0].id;
+
+    const request = new Request(`http://localhost/api/sessions/${sessionId}/answers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId, userAnswer: 123 }),
+    });
+    const res = await app.request(request);
+    expect(res.status).toBe(400);
+  });
+});

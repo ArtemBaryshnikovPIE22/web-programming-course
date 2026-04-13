@@ -1,90 +1,233 @@
-import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
-import { PrismaClient } from '@prisma/client'
-import { sessionService } from '../services/sessionService.js'
-import { startSessionSchema, answerSchema } from '../utils/validation.js'
+import { Hono } from "hono"
 
-const prisma = new PrismaClient()
-const sessions = new Hono()
+import { authMiddleware } from "../middleware/auth.js"
+import { prisma } from "../lib/prisma.js"
+import { sessionService } from "../services/sessionService.js"
 
-// POST /api/sessions
-sessions.post('/', zValidator('json', startSessionSchema), async (c) => {
+import {
+  answerSchema,
+  createSessionSchema,
+  paginationSchema,
+  toPrismaPage,
+} from "../utils/validation.js"
+
+import {
+  SessionNotFoundError,
+  SessionExpiredError,
+  SessionAlreadyCompletedError,
+  QuestionNotFoundError,
+  DuplicateAnswerError,
+} from "../services/sessionService.js"
+
+export const sessions = new Hono()
+
+sessions.use("*", authMiddleware)
+
+function getUserId(c: any): string {
+  const payload = c.get("jwtPayload") as { userId: string }
+  return payload.userId
+}
+
+//
+//
+sessions.post("/", async (c) => {
+  let body: unknown = {}
   try {
-    const { userId } = c.req.valid('json')
+    body = await c.req.json()
+  } catch {}
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    })
+  const parsed = createSessionSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json(
+      { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
+      400
+    )
+  }
 
-    if (!user) {
-      return c.json({ error: 'Пользователь не найден' }, 404)
-    }
+  const userId = getUserId(c)
 
-    const questionsCount = await prisma.question.count()
-    if (questionsCount === 0) {
-      return c.json({ error: 'Нет доступных вопросов' }, 400)
-    }
+  // проверка пользователя
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  })
+  if (!user) return c.json({ error: "User not found" }, 404)
 
-    const session = await prisma.session.create({
-      data: {
-        userId,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000)
+  // получаем вопросы (ГЛАВНОЕ из второго файла)
+  const dbQuestions = await prisma.question.findMany(
+    parsed.data.categoryId
+      ? { where: { categoryId: parsed.data.categoryId } }
+      : undefined
+  )
+
+  if (dbQuestions.length === 0) {
+    return c.json({ error: "No questions found" }, 404)
+  }
+
+  // создаём сессию (можешь передать mode/category при желании)
+  const session = await sessionService.createSession(userId, parsed.data)
+
+  const maxScore = dbQuestions.reduce((sum, q) => sum + q.points, 0)
+
+  return c.json(
+    {
+      sessionId: session.id,
+      userId: session.userId,
+      status: "active",
+
+      // ВОТ ЭТО ТЫ ХОТЕЛ ДОБАВИТЬ
+      questions: dbQuestions.map((q) => ({
+        id: q.id,
+        type: q.type,
+        question: q.text,
+        categoryId: q.categoryId,
+        maxPoints: q.points,
+      })),
+
+      questionIds: dbQuestions.map((q) => q.id),
+      totalQuestions: dbQuestions.length,
+      answeredCount: 0,
+      maxScore,
+      currentScore: 0,
+
+      createdAt: session.createdAt.toISOString(),
+      expiresAt: session.expiresAt.toISOString(),
+    },
+    201
+  )
+})
+
+//
+// ✅ СПИСОК СЕССИЙ (из файла 2)
+//
+sessions.get("/", async (c) => {
+  const userId = getUserId(c)
+
+  const pagination = paginationSchema.safeParse({
+    page: c.req.query("page"),
+    limit: c.req.query("limit"),
+  })
+
+  const { skip, take } = pagination.success
+    ? toPrismaPage(pagination.data)
+    : { skip: 0, take: 20 }
+
+  const [items, total] = await Promise.all([
+    prisma.session.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: {
+        id: true,
+        status: true,
+        score: true,
+        startedAt: true,
+        expiresAt: true,
+        completedAt: true,
+        createdAt: true,
+        _count: { select: { answers: true } },
       },
-      include: { user: true }
-    })
+    }),
+    prisma.session.count({ where: { userId } }),
+  ])
 
-    return c.json({ session }, 201)
-  } catch (error) {
-    console.error(error)
-    return c.json({ error: 'Внутренняя ошибка сервера' }, 500)
-  }
+  return c.json({
+    sessions: items,
+    pagination: {
+      total,
+      page: pagination.success ? pagination.data.page : 1,
+      limit: take,
+      pages: Math.ceil(total / take),
+    },
+  })
 })
 
-// POST /api/sessions/:id/answers
-sessions.post('/:id/answers', zValidator('json', answerSchema), async (c) => {
+//
+// ✅ ПОЛУЧЕНИЕ СЕССИИ
+//
+sessions.get("/:id", async (c) => {
+  const sessionId = c.req.param("id")
+  const userId = getUserId(c)
+
   try {
-    const sessionId = c.req.param('id')
-    const { questionId, userAnswer } = c.req.valid('json') 
-
-    const answer = await sessionService.submitAnswer({
-      sessionId,
-      questionId,
-      userAnswer
-    })
-
-    return c.json({ answer }, 201)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
-    return c.json({ error: message }, 400)
-  }
-})
-
-sessions.get('/:id', async (c) => {
-  try {
-    const sessionId = c.req.param('id')
-    const userId = c.req.header('X-User-Id')
-
-    if (!userId) {
-      return c.json({ error: 'Не авторизован' }, 401)
-    }
-
-    const session = await sessionService.getSessionWithAnswers(sessionId, userId)
+    const session = await sessionService.getSession(sessionId, userId)
     return c.json({ session })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
-    return c.json({ error: message }, 400)
+  } catch (err) {
+    if (err instanceof SessionNotFoundError) {
+      return c.json({ error: err.message }, 404)
+    }
+    throw err
   }
 })
 
-sessions.post('/:id/submit', async (c) => {
+//
+// ✅ ОТВЕТ НА ВОПРОС
+//
+sessions.post("/:id/answers", async (c) => {
+  const sessionId = c.req.param("id")
+  const userId = getUserId(c)
+
+  const ownership = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { userId: true },
+  })
+
+  if (!ownership) return c.json({ error: "Session not found" }, 404)
+  if (ownership.userId !== userId) return c.json({ error: "Forbidden" }, 403)
+
+  let body: unknown
   try {
-    const sessionId = c.req.param('id')
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400)
+  }
+
+  const parsed = answerSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json(
+      { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
+      400
+    )
+  }
+
+  const { questionId, userAnswer } = parsed.data
+
+  try {
+    const answer = await sessionService.submitAnswer(sessionId, questionId, userAnswer)
+    return c.json({ answer }, 201)
+  } catch (err) {
+    if (err instanceof SessionNotFoundError) return c.json({ error: err.message }, 404)
+    if (err instanceof SessionExpiredError) return c.json({ error: err.message }, 410)
+    if (err instanceof SessionAlreadyCompletedError) return c.json({ error: err.message }, 409)
+    if (err instanceof QuestionNotFoundError) return c.json({ error: err.message }, 404)
+    if (err instanceof DuplicateAnswerError) return c.json({ error: err.message }, 409)
+    throw err
+  }
+})
+
+//
+// ✅ ЗАВЕРШЕНИЕ СЕССИИ
+//
+sessions.post("/:id/submit", async (c) => {
+  const sessionId = c.req.param("id")
+  const userId = getUserId(c)
+
+  const ownership = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { userId: true },
+  })
+
+  if (!ownership) return c.json({ error: "Session not found" }, 404)
+  if (ownership.userId !== userId) return c.json({ error: "Forbidden" }, 403)
+
+  try {
     const session = await sessionService.submitSession(sessionId)
     return c.json({ session })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
-    return c.json({ error: message }, 400)
+  } catch (err) {
+    if (err instanceof SessionNotFoundError) return c.json({ error: err.message }, 404)
+    if (err instanceof SessionExpiredError) return c.json({ error: err.message }, 410)
+    if (err instanceof SessionAlreadyCompletedError) return c.json({ error: err.message }, 409)
+    throw err
   }
 })
-
-export default sessions

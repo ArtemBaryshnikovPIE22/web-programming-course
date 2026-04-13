@@ -1,83 +1,89 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { scoringService } from './scoringService.js'
+import { describe, it, expect } from 'vitest';
+import { scoringService } from './scoringService.js';
 
-describe('ScoringService Unit Tests', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
-  })
-
+describe('ScoringService', () => {
   describe('scoreMultipleSelect', () => {
-    it('should return full points if all correct answers are selected', () => {
-      const correct = ['A', 'B']
-      const student = ['A', 'B']
-      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(2)
-    })
+    it('должен вернуть максимальный балл, если все ответы правильные и уникальные', () => {
+      const correct = [1, 2, 3];
+      const student = [1, 2, 3];
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(3);
+    });
 
-    it('should penalize for incorrect extra options (penalty -0.5)', () => {
-      const correct = ['A', 'B']
-      const student = ['A', 'B', 'C'] // C - лишний
-      // 2 (за правильные) - 0.5 (за лишний) = 1.5
-      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(1.5)
-    })
+    it('должен учитывать штраф за неправильные ответы', () => {
+      const correct = [1, 2];
+      const student = [1, 3];
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(1 - 0.5); // 0.5
+    });
 
-    it('should not return negative score (edge case)', () => {
-      const correct = ['A']
-      const student = ['X', 'Y', 'Z'] 
-      // 0 - 1.5 = -1.5 -> должно быть 0
-      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(0)
-    })
+    it('не должен опускаться ниже 0', () => {
+      const correct = [1];
+      const student = [2, 3];
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(0);
+    });
 
-    it('should return 0 if student answers are empty', () => {
-      expect(scoringService.scoreMultipleSelect(['A'], [])).toBe(0)
-    })
-  })
+    it('должен корректно обрабатывать пустой массив ответов студента', () => {
+      const correct = [1, 2];
+      const student: number[] = [];
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(0);
+    });
+
+    it('должен корректно обрабатывать повторяющиеся ответы (дубликаты)', () => {
+      const correct = [1];
+      const student = [1, 1];
+      // Первый правильный (+1), второй – неправильный (повтор) → -0.5
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(0.5);
+    });
+
+    it('должен корректно работать, когда правильный ответ – несколько вариантов', () => {
+      const correct = [1, 3];
+      const student = [1, 3, 5];
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(2 - 0.5); // 1.5
+    });
+
+    it('должен возвращать 0, если все ответы неправильные', () => {
+      const correct = [1, 2];
+      const student = [3, 4];
+      expect(scoringService.scoreMultipleSelect(correct, student)).toBe(0);
+    });
+  });
 
   describe('scoreEssay', () => {
-    const mockRubric = {
-      maxPoints: 10,
-      criteria: [
-        { name: 'Grammar', maxPoints: 5 },
-        { name: 'Logic', maxPoints: 5 }
-      ]
-    }
+    it('должен суммировать оценки в пределах рубрики', () => {
+      const grades = [3, 4, 5];
+      const rubric = [5, 5, 5];
+      expect(scoringService.scoreEssay(grades, rubric)).toBe(12);
+    });
 
-    it('should sum up grades correctly', () => {
-      const grades = [4, 3]
-      expect(scoringService.scoreEssay(grades, mockRubric)).toBe(7)
-    })
+    it('должен ограничивать каждую оценку максимумом рубрики', () => {
+      const grades = [6, 4, 7];
+      const rubric = [5, 5, 5];
+      expect(scoringService.scoreEssay(grades, rubric)).toBe(5 + 4 + 5); // 14
+    });
 
-    it('should cap total score at rubric.maxPoints', () => {
-      const grades = [5, 5]
-      const smallMaxRubric = { ...mockRubric, maxPoints: 8 }
-      // Сумма 10, но максимум 8
-      expect(scoringService.scoreEssay(grades, smallMaxRubric)).toBe(8)
-    })
+    it('должен выбрасывать ошибку при разной длине массивов', () => {
+      const grades = [3, 4];
+      const rubric = [5, 5, 5];
+      expect(() => scoringService.scoreEssay(grades, rubric)).toThrowError(
+        'Длины массивов grades и rubric должны совпадать'
+      );
+    });
 
-    it('should throw error if grades count mismatch criteria', () => {
-      expect(() => scoringService.scoreEssay([5], mockRubric)).toThrow(
-        'Количество оценок должно соответствовать количеству критериев'
-      )
-    })
+    it('должен корректно работать с нулевыми оценками', () => {
+      const grades = [0, 0, 0];
+      const rubric = [5, 5, 5];
+      expect(scoringService.scoreEssay(grades, rubric)).toBe(0);
+    });
 
-    it('should throw error if grade exceeds criterion maxPoints', () => {
-      expect(() => scoringService.scoreEssay([6, 0], mockRubric)).toThrow(
-        /не может превышать 5/
-      )
-    })
-  })
+    it('должен правильно считать, если оценки в точности равны максимуму', () => {
+      const grades = [5, 5, 5];
+      const rubric = [5, 5, 5];
+      expect(scoringService.scoreEssay(grades, rubric)).toBe(15);
+    });
 
-  describe('scoreQuestion (Main Entry)', () => {
-    it('should correctly route to single-select logic', () => {
-      const score = scoringService.scoreQuestion('single-select', 'A', 'A')
-      expect(score).toBe(1)
-      const wrongScore = scoringService.scoreQuestion('single-select', 'A', 'B')
-      expect(wrongScore).toBe(0)
-    })
-
-    it('should throw error for essay if rubric is missing', () => {
-      expect(() => scoringService.scoreQuestion('essay', null, [5])).toThrow(
-        'Для essay вопросов необходима рубрика оценивания'
-      )
-    })
-  })
-})
+    it('должен корректно обрабатывать, когда одна из оценок превышает максимум', () => {
+      const grades = [10, 2];
+      const rubric = [5, 3];
+      expect(scoringService.scoreEssay(grades, rubric)).toBe(5 + 2); // 7
+    });
+  });
+});

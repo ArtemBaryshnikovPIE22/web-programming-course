@@ -1,58 +1,50 @@
-import type { Context, Next } from 'hono'
-import { verify } from 'hono/jwt'
-import { PrismaClient } from '@prisma/client'
+import { verify } from 'hono/jwt';
+import { prisma } from '../lib/prisma.js';
 
-const prisma = new PrismaClient()
-
-export async function requireAdmin(c: Context, next: Next) {
-  try {
-    // Получаем токен из заголовка
-    const authHeader = c.req.header('Authorization')
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return c.json({ 
-        success: false,
-        error: 'Unauthorized',
-        message: 'Missing or invalid Authorization header'
-      }, 401)
-    }
-
-    const token = authHeader.split(' ')[1]
-    const secret = process.env.JWT_SECRET || 'dev-secret-key'
-    
-    // Верифицируем токен
-    const payload = await verify(token, secret, 'HS256')
-    
-    // Проверяем, есть ли пользователь в базе
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub as string }
-    })
-
-    if (!user) {
-      return c.json({ 
-        success: false,
-        error: 'User not found'
-      }, 404)
-    }
-
-    // Проверяем роль admin
-    if (user.role !== 'admin') {
-      return c.json({ 
-        success: false,
-        error: 'Forbidden',
-        message: 'Admin access required'
-      }, 403)
-    }
-
-    // Сохраняем пользователя в контекст для дальнейшего использования
-    c.set('user', user)
-    await next()
-    
-  } catch (error) {
-    return c.json({ 
-      success: false,
-      error: 'Unauthorized',
-      message: 'Invalid token'
-    }, 401)
+// проверяет, что текущий пользователь аутентифицирован и имеет роль admin
+export async function adminMiddleware(c: any, next: any) {
+  const authHeader = c.req.header('Authorization');
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    return c.json({ error: 'JWT_SECRET not configured' }, 500);
   }
+
+  // проверка, что заголовок начинается с Bearer
+  if (!authHeader?.startsWith('Bearer ')) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const token = authHeader.slice('Bearer '.length).trim();
+  if (!token) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  let payload: any;
+  try {
+    payload = await verify(token, jwtSecret, 'HS256');
+  } catch {
+    return c.json({ error: 'Invalid token' }, 401);
+  }
+
+  const userId = payload.sub;
+  if (!userId) {
+    return c.json({ error: 'Invalid token' }, 401);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true }
+  });
+
+  if (!user) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  if (user.role !== 'admin') {
+    return c.json({ error: 'Forbidden: Admin access required' }, 403);
+  }
+
+  c.set('userId', user.id);
+  c.set('userRole', user.role);
+  await next();
 }

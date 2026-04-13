@@ -1,130 +1,140 @@
-import { describe, it, expect } from 'vitest'
-import { 
-  githubCallbackSchema, 
-  startSessionSchema, 
-  answerSchema, 
-  gradeSchema, 
-  questionSchema 
-} from './validation'
+import { describe, it, expect } from 'vitest';
+import {
+  githubCallbackSchema,
+  SessionIdParamSchema,
+  AnswerSchema,
+  GradeSchema,
+  QuestionSchema,
+} from './validation.js';
 
-describe('Validation Schemas Unit Tests', () => {
-  const validCuid = 'cjld2cjxh0000qzrmn831i7rn'
+describe('Validation schemas', () => {
+  describe('githubCallbackSchema', () => {
+    it('должен успешно валидировать корректный объект', () => {
+      const valid = { code: 'test_code' };
+      expect(() => githubCallbackSchema.parse(valid)).not.toThrow();
+    });
 
-  describe('startSessionSchema', () => {
-    it('should pass with a valid cuid', () => {
-      const result = startSessionSchema.safeParse({ userId: validCuid })
-      expect(result.success).toBe(true)
-    })
+    it('должен отклонять объект без code', () => {
+      const invalid = {};
+      expect(() => githubCallbackSchema.parse(invalid)).toThrow();
+    });
 
-    it('should fail with an invalid cuid format', () => {
-      const result = startSessionSchema.safeParse({ userId: 'invalid-id-123' })
-      expect(result.success).toBe(false)
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain('Некорректный формат userId')
-      }
-    })
-  })
+    it('должен отклонять пустую строку code', () => {
+      const invalid = { code: '' };
+      expect(() => githubCallbackSchema.parse(invalid)).toThrow();
+    });
+  });
 
-  describe('answerSchema (Edge Cases)', () => {
-    it('should accept array of strings (multiple-select)', () => {
-      const data = { questionId: validCuid, userAnswer: ['choice1', 'choice2'] }
-      expect(answerSchema.safeParse(data).success).toBe(true)
-    })
+  describe('SessionIdParamSchema', () => {
+    it('должен успешно валидировать непустой id', () => {
+      const valid = { id: 'session_123' };
+      expect(() => SessionIdParamSchema.parse(valid)).not.toThrow();
+    });
 
-    it('should accept array of numbers (essay grades)', () => {
-      const data = { questionId: validCuid, userAnswer: [10, 8, 9] }
-      expect(answerSchema.safeParse(data).success).toBe(true)
-    })
+    it('должен отклонять пустой id', () => {
+      const invalid = { id: '' };
+      expect(() => SessionIdParamSchema.parse(invalid)).toThrow();
+    });
 
-    it('should reject if questionId is not a cuid', () => {
-      const data = { questionId: '123', userAnswer: 'test' }
-      expect(answerSchema.safeParse(data).success).toBe(false)
-    })
-  })
+    it('должен отклонять отсутствие id', () => {
+      const invalid = {};
+      expect(() => SessionIdParamSchema.parse(invalid)).toThrow();
+    });
+  });
 
-  describe('gradeSchema', () => {
-    it('should fail if any grade is negative', () => {
-      const data = {
-        grades: [5, -1],
-        rubric: {
-          maxPoints: 10,
-          criteria: [{ name: 'Test', maxPoints: 10 }]
-        }
-      }
-      expect(gradeSchema.safeParse(data).success).toBe(false)
-    })
+  describe('AnswerSchema', () => {
+    it('должен успешно валидировать объект с questionId и userAnswer (массив)', () => {
+      const valid = { questionId: 'q1', userAnswer: ['0'] };
+      expect(() => AnswerSchema.parse(valid)).not.toThrow();
+    });
 
-    it('should fail if rubric has no criteria (min 1)', () => {
-      const data = {
-        grades: [5],
-        rubric: { maxPoints: 10, criteria: [] }
-      }
-      const result = gradeSchema.safeParse(data)
-      expect(result.success).toBe(false)
-      if (!result.success) {
-        expect(result.error.issues[0].message).toBe('Нужен хотя бы один критерий')
-      }
-    })
-  })
+    it('должен успешно валидировать объект с userAnswer (строка)', () => {
+      const valid = { questionId: 'q1', userAnswer: 'text' };
+      expect(() => AnswerSchema.parse(valid)).not.toThrow();
+    });
 
-  describe('questionSchema Defaults', () => {
-    it('should use default value of 1 for points', () => {
-      const data = {
-        text: 'Valid Question Text',
+    it('должен отклонять объект без questionId', () => {
+      const invalid = { userAnswer: ['0'] };
+      expect(() => AnswerSchema.parse(invalid)).toThrow();
+    });
+
+    it('должен отклонять объект без userAnswer', () => {
+      const invalid = { questionId: 'q1' };
+      expect(() => AnswerSchema.parse(invalid)).toThrow();
+    });
+
+    it('должен отклонять userAnswer не строку и не массив', () => {
+      const invalid = { questionId: 'q1', userAnswer: 123 };
+      expect(() => AnswerSchema.parse(invalid)).toThrow();
+    });
+  });
+
+  describe('GradeSchema', () => {
+    it('должен успешно валидировать объект с answerId и grades (массив чисел)', () => {
+      const valid = { answerId: 'a1', grades: [4, 5] };
+      expect(() => GradeSchema.parse(valid)).not.toThrow();
+    });
+
+    it('должен отклонять пустой массив grades', () => {
+      const invalid = { answerId: 'a1', grades: [] };
+      expect(() => GradeSchema.parse(invalid)).toThrow();
+    });
+
+    it('должен отклонять отсутствие answerId', () => {
+      const invalid = { grades: [4] };
+      expect(() => GradeSchema.parse(invalid)).toThrow();
+    });
+
+    it('должен отклонять grades не массив чисел', () => {
+      const invalid = { answerId: 'a1', grades: ['4', '5'] };
+      expect(() => GradeSchema.parse(invalid)).toThrow();
+    });
+  });
+
+  describe('QuestionSchema', () => {
+    it('должен успешно валидировать корректный объект (с correctAnswer)', () => {
+      const valid = {
+        text: 'Столица Франции?',
+        type: 'multiple-select',
+        categoryId: 'cat1',
+        correctAnswer: ['0'],
+        points: 5,
+      };
+      expect(() => QuestionSchema.parse(valid)).not.toThrow();
+    });
+
+    it('должен успешно валидировать без correctAnswer и points (использует значения по умолчанию)', () => {
+      const valid = {
+        text: 'Эссе',
         type: 'essay',
-        categoryId: validCuid
-      }
-      const result = questionSchema.safeParse(data)
-      expect(result.success).toBe(true)
-      if (result.success) {
-        expect(result.data.points).toBe(1)
-      }
-    })
-  })
-})
-describe('Validation Negative Cases', () => {
-  
-  describe('gradeSchema Negative', () => {
-    it('should fail if maxPoints is negative', () => {
-      const badData = {
-        grades: [5],
-        rubric: { maxPoints: -10, criteria: [{ name: 'Test', maxPoints: 5 }] }
-      }
-      const result = gradeSchema.safeParse(badData)
-      expect(result.success).toBe(false)
-      if (!result.success) {
-        expect(result.error.issues[0].message).toBe('Максимальный балл должен быть положительным')
-      }
-    })
+        categoryId: 'cat2',
+      };
+      expect(() => QuestionSchema.parse(valid)).not.toThrow();
+    });
 
-    it('should fail if criterion name is empty', () => {
-      const badData = {
-        grades: [1],
-        rubric: { maxPoints: 10, criteria: [{ name: '', maxPoints: 5 }] }
-      }
-      const result = gradeSchema.safeParse(badData)
-      expect(result.success).toBe(false)
-    })
-  })
+    it('должен отклонять отсутствие text', () => {
+      const invalid = { type: 'essay', categoryId: 'cat' };
+      expect(() => QuestionSchema.parse(invalid)).toThrow();
+    });
 
-  describe('answerSchema Negative', () => {
-    it('should fail if userAnswer is a boolean (invalid type)', () => {
-      const result = answerSchema.safeParse({
-        questionId: 'cjld2cjxh0000qzrmn831i7rn',
-        userAnswer: true // Не разрешено в z.union
-      })
-      expect(result.success).toBe(false)
-    })
-  })
+    it('должен отклонять неверный type', () => {
+      const invalid = {
+        text: 'Вопрос',
+        type: 'invalid-type',
+        categoryId: 'cat',
+      };
+      expect(() => QuestionSchema.parse(invalid)).toThrow();
+    });
 
-  describe('questionSchema Negative', () => {
-    it('should fail if type is not in enum', () => {
-      const result = questionSchema.safeParse({
-        text: 'Valid text length',
-        type: 'true-false-invalid',
-        categoryId: 'cjld2cjxh0000qzrmn831i7rn'
-      })
-      expect(result.success).toBe(false)
-    })
-  })
-})
+    it('должен отклонять отсутствие categoryId', () => {
+      const invalid = { text: 'Вопрос', type: 'essay' };
+      expect(() => QuestionSchema.parse(invalid)).toThrow();
+    });
+
+    it('должен устанавливать points = 1 по умолчанию', () => {
+      const valid = { text: 'Вопрос', type: 'essay', categoryId: 'cat' };
+      const result = QuestionSchema.parse(valid);
+      expect(result.points).toBe(1);
+    });
+  });
+});

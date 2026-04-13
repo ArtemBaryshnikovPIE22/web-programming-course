@@ -1,14 +1,18 @@
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    globals: true,
-    environment: 'node',
-    include: ['src/**/*.{test,spec}.ts', 'src/**/*.{unit,feature}.test.ts'],
+    globals: true,  
+    environment: 'node',         // бэкенд работает в Node.js
+    include: ['src/**/*.{test,spec}.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: ['node_modules/', 'dist/', 'src/index.ts', '**/test/**', '**/*.test.ts', 'src/middleware/**', 'src/services/github.ts']
-    }
-  }
-})
+      reporter: ['text', 'html', 'json'],
+      exclude: [
+        'node_modules/',
+        'src/**/*.{unit,feature}.test.ts',
+        'src/**/*.spec.ts',
+      ],
+    },
+  },
+});
